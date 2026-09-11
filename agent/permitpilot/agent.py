@@ -1,0 +1,47 @@
+﻿from __future__ import annotations
+
+import os
+
+from dotenv import load_dotenv
+from strands import Agent
+from strands.models import BedrockModel
+
+from .prompts import PERMITPILOT_SYSTEM_PROMPT
+from .tools import inspect_project
+
+load_dotenv()
+
+
+def build_permitpilot_agent() -> Agent:
+    """Create the PermitPilot Strands agent."""
+
+    model_id = os.getenv("BEDROCK_MODEL_ID")
+    region = os.getenv("AWS_REGION", "us-east-1")
+
+    if model_id:
+        model = BedrockModel(
+            model_id=model_id,
+            region_name=region,
+            temperature=0.2,
+        )
+
+        return Agent(
+            name="PermitPilot",
+            description=(
+                "Autonomous permit and compliance operations agent "
+                "for construction professionals."
+            ),
+            model=model,
+            system_prompt=PERMITPILOT_SYSTEM_PROMPT,
+            tools=[inspect_project],
+        )
+
+    return Agent(
+        name="PermitPilot",
+        description=(
+            "Autonomous permit and compliance operations agent "
+            "for construction professionals."
+        ),
+        system_prompt=PERMITPILOT_SYSTEM_PROMPT,
+        tools=[inspect_project],
+    )

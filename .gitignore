@@ -45,3 +45,9 @@ next-env.d.ts
 
 # PermitPilot safe environment template
 !.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+agent/.venv/
