@@ -1,0 +1,43 @@
+﻿{
+  "jurisdiction": "Houston, Texas",
+  "authority": "City of Houston",
+  "status": "verified_fixture",
+  "sources": [
+    {
+      "source_name": "Houston Permitting Center - Residential Plan Review",
+      "source_url": "https://www.houstonpermittingcenter.org/building-code-enforcement/residential-plan-review",
+      "source_type": "official_jurisdiction_guidance",
+      "verified": true,
+      "requirements": [
+        "A building permit is required for most residential projects inside the corporate City of Houston limits.",
+        "New residential applicants should collect the information identified by the New Single Family Prerequisite Checklist.",
+        "New construction requires a deed restrictions declaration form.",
+        "A Wastewater Capacity Reservation letter is required before submitting plans for review.",
+        "Plans and required documents are submitted electronically through the City's permitting workflow and ProjectDox."
+      ],
+      "notes": "Official City of Houston residential plan review guidance. Project-specific applicability must still be validated."
+    },
+    {
+      "source_name": "Houston Permitting Center - Residential Site Development Permit",
+      "source_url": "https://www.houstonpermittingcenter.org/hpwcode1139",
+      "source_type": "official_permit_guidance",
+      "verified": true,
+      "requirements": [
+        "Residential site development review may involve structural, planning, utilities, stormwater, traffic, mechanical, electrical, plumbing, infrastructure, forestry, sprinkler, fire, health, engineering, or floodplain review depending on project scope.",
+        "A building permit application and complete set of plans are required for residential site development review.",
+        "Architectural, structural, civil, mechanical, electrical, plumbing, sprinkler, fire alarm, or fire suppression drawings may be required depending on project scope."
+      ],
+      "notes": "Official City of Houston permit guidance. Discipline applicability depends on project conditions and scope."
+    },
+    {
+      "source_name": "City of Houston Permit Portal",
+      "source_url": "https://permits.houstontx.gov/",
+      "source_type": "official_permit_portal",
+      "verified": true,
+      "requirements": [
+        "The City permit portal supports permit applications, permit printing, permit search, payments, inspection scheduling, and permit progress tracking."
+      ],
+      "notes": "Official City of Houston permit portal."
+    }
+  ]
+}

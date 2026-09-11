@@ -7,7 +7,7 @@ from strands import Agent
 from strands.models import BedrockModel
 
 from .prompts import PERMITPILOT_SYSTEM_PROMPT
-from .tools import inspect_project
+from .tools import inspect_project, research_jurisdiction
 
 load_dotenv()
 
@@ -17,6 +17,11 @@ def build_permitpilot_agent() -> Agent:
 
     model_id = os.getenv("BEDROCK_MODEL_ID")
     region = os.getenv("AWS_REGION", "us-east-1")
+
+    tools = [
+        inspect_project,
+        research_jurisdiction,
+    ]
 
     if model_id:
         model = BedrockModel(
@@ -33,7 +38,7 @@ def build_permitpilot_agent() -> Agent:
             ),
             model=model,
             system_prompt=PERMITPILOT_SYSTEM_PROMPT,
-            tools=[inspect_project],
+            tools=tools,
         )
 
     return Agent(
@@ -43,5 +48,5 @@ def build_permitpilot_agent() -> Agent:
             "for construction professionals."
         ),
         system_prompt=PERMITPILOT_SYSTEM_PROMPT,
-        tools=[inspect_project],
+        tools=tools,
     )
