@@ -8,6 +8,7 @@ from .models import (
     AgentAction,
     ApplicabilityAnalysis,
     DocumentComplianceAnalysis,
+    SubmissionReadinessAnalysis,
     ApprovalState,
     EvidenceStatus,
     HumanDecision,
@@ -18,6 +19,7 @@ from .models import (
 )
 from .tools import (
     analyze_document_compliance,
+    calculate_submission_readiness,
     analyze_permit_applicability,
     inspect_project,
     research_jurisdiction,
@@ -479,6 +481,135 @@ def create_document_compliance_workflow_result(
     )
 
 
+
+def create_submission_readiness_workflow_result(
+    project: ProjectInput,
+) -> WorkflowResult:
+    """Calculate permit submission readiness from compliance results."""
+
+    compliance_result = create_document_compliance_workflow_result(project)
+
+    if (
+        compliance_result.document_compliance is None
+        or compliance_result.jurisdiction_evidence is None
+        or compliance_result.applicability_analysis is None
+    ):
+        return compliance_result
+
+    compliance = compliance_result.document_compliance
+
+    raw_readiness = calculate_submission_readiness(
+        compliance_results=[
+            {
+                "requirement": item.requirement,
+                "status": item.status.value,
+                "remediation": item.remediation,
+            }
+            for item in compliance.results
+        ]
+    )
+
+    readiness = SubmissionReadinessAnalysis(**raw_readiness)
+
+    actions = list(compliance_result.actions)
+    actions.append(
+        AgentAction(
+            action="calculate_submission_readiness",
+            explanation=(
+                "Calculated submission readiness, blocking gaps, "
+                "remediation priority, and estimated delay risk."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Provides a quantified go/no-go decision before permit "
+                "submission."
+            ),
+        )
+    )
+
+    if not readiness.ready_for_submission:
+        evidence_items = [
+            (
+                f"Priority {item.priority}: "
+                f"{item.requirement} -> {item.action}"
+            )
+            for item in readiness.remediation_actions
+        ]
+
+        decision = HumanDecision(
+            decision_id=f"{project.project_id}-submission-readiness",
+            title="Permit package is not ready for submission",
+            recommendation=(
+                "Complete blocking remediation actions before authorizing "
+                "permit submission."
+            ),
+            explanation=(
+                f"PermitPilot calculated a readiness score of "
+                f"{readiness.readiness_score}/100 with "
+                f"{readiness.blocking_count} blocking item(s)."
+            ),
+            confidence=100,
+            projected_impact=(
+                f"Resolving the identified blockers may avoid approximately "
+                f"{readiness.estimated_delay_risk_days} days of preventable "
+                f"review delay."
+            ),
+            evidence=evidence_items,
+            approval_state=ApprovalState.PENDING,
+        )
+
+        return WorkflowResult(
+            project_id=project.project_id,
+            status=WorkflowStatus.READINESS_REVIEW,
+            summary=(
+                "PermitPilot completed submission-readiness analysis and "
+                "identified blocking remediation actions."
+            ),
+            actions=actions,
+            jurisdiction_evidence=compliance_result.jurisdiction_evidence,
+            applicability_analysis=compliance_result.applicability_analysis,
+            document_compliance=compliance,
+            submission_readiness=readiness,
+            decision=decision,
+            next_action="Complete prioritized remediation actions.",
+        )
+
+    return WorkflowResult(
+        project_id=project.project_id,
+        status=WorkflowStatus.READY_FOR_SUBMISSION,
+        summary=(
+            "PermitPilot found no blocking compliance gaps. "
+            "The package is ready for human submission approval."
+        ),
+        actions=actions,
+        jurisdiction_evidence=compliance_result.jurisdiction_evidence,
+        applicability_analysis=compliance_result.applicability_analysis,
+        document_compliance=compliance,
+        submission_readiness=readiness,
+        decision=HumanDecision(
+            decision_id=f"{project.project_id}-submission-approval",
+            title="Approve permit submission",
+            recommendation=(
+                "Approve the prepared permit package for submission."
+            ),
+            explanation=(
+                "No blocking document-compliance gaps remain."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Advances the project to submission while preserving "
+                "human control over the consequential external action."
+            ),
+            evidence=[
+                f"Readiness score: {readiness.readiness_score}/100",
+                "Blocking items: 0",
+            ],
+            approval_state=ApprovalState.PENDING,
+        ),
+        next_action="Request human approval to submit permit package.",
+    )
+
+
 def invoke_agent(project: ProjectInput):
     agent = build_permitpilot_agent()
 
@@ -496,6 +627,7 @@ Use inspect_project first.
 Then use research_jurisdiction.
 Then use analyze_permit_applicability only on verified requirements.
 Then use analyze_document_compliance against the available project documents.
+Then use calculate_submission_readiness to quantify blockers and readiness.
 
 Do not invent jurisdiction-specific permit requirements.
 Distinguish verified evidence from assumptions.

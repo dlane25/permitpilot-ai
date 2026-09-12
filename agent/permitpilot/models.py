@@ -12,6 +12,8 @@ class WorkflowStatus(str, Enum):
     EVIDENCE_READY = "evidence_ready"
     APPLICABILITY_READY = "applicability_ready"
     COMPLIANCE_READY = "compliance_ready"
+    READINESS_REVIEW = "readiness_review"
+    READY_FOR_SUBMISSION = "ready_for_submission"
     READY = "ready"
     FAILED = "failed"
 
@@ -136,6 +138,32 @@ class DocumentComplianceAnalysis(BaseModel):
     needs_human_review_count: int
 
 
+class ReadinessItem(BaseModel):
+    requirement: str
+    status: str
+    remediation: str | None = None
+    reason: str | None = None
+
+
+class RemediationAction(BaseModel):
+    priority: int
+    requirement: str
+    status: str
+    action: str
+
+
+class SubmissionReadinessAnalysis(BaseModel):
+    readiness_score: int = Field(ge=0, le=100)
+    ready_for_submission: bool
+    blocking_items: list[ReadinessItem] = Field(default_factory=list)
+    non_blocking_items: list[ReadinessItem] = Field(default_factory=list)
+    remediation_actions: list[RemediationAction] = Field(default_factory=list)
+    blocking_count: int
+    non_blocking_count: int
+    estimated_admin_effort_hours: float
+    estimated_delay_risk_days: int
+
+
 class AgentAction(BaseModel):
     action: str
     explanation: str
@@ -166,5 +194,6 @@ class WorkflowResult(BaseModel):
     jurisdiction_evidence: JurisdictionEvidence | None = None
     applicability_analysis: ApplicabilityAnalysis | None = None
     document_compliance: DocumentComplianceAnalysis | None = None
+    submission_readiness: SubmissionReadinessAnalysis | None = None
     decision: HumanDecision | None = None
     next_action: str | None = None
