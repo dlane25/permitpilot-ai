@@ -7,7 +7,11 @@ from strands import Agent
 from strands.models import BedrockModel
 
 from .prompts import PERMITPILOT_SYSTEM_PROMPT
-from .tools import inspect_project, research_jurisdiction
+from .tools import (
+    analyze_permit_applicability,
+    inspect_project,
+    research_jurisdiction,
+)
 
 load_dotenv()
 
@@ -21,6 +25,7 @@ def build_permitpilot_agent() -> Agent:
     tools = [
         inspect_project,
         research_jurisdiction,
+        analyze_permit_applicability,
     ]
 
     if model_id:

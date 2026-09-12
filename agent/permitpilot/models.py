@@ -10,6 +10,7 @@ class WorkflowStatus(str, Enum):
     ANALYZING = "analyzing"
     DECISION_REQUIRED = "decision_required"
     EVIDENCE_READY = "evidence_ready"
+    APPLICABILITY_READY = "applicability_ready"
     READY = "ready"
     FAILED = "failed"
 
@@ -25,6 +26,13 @@ class ApprovalState(str, Enum):
 class EvidenceStatus(str, Enum):
     VERIFIED = "verified"
     UNVERIFIED = "unverified"
+    NEEDS_HUMAN_REVIEW = "needs_human_review"
+
+
+class ApplicabilityClassification(str, Enum):
+    APPLICABLE = "applicable"
+    CONDITIONAL = "conditional"
+    NOT_APPLICABLE = "not_applicable"
     NEEDS_HUMAN_REVIEW = "needs_human_review"
 
 
@@ -66,6 +74,29 @@ class JurisdictionEvidence(BaseModel):
     observations: list[str] = Field(default_factory=list)
 
 
+class ApplicabilityDetermination(BaseModel):
+    requirement: str
+    classification: ApplicabilityClassification
+    confidence: int = Field(ge=0, le=100)
+    rationale: str
+    projected_impact: str
+    source_name: str | None = None
+    source_url: str | None = None
+
+
+class ApplicabilityAnalysis(BaseModel):
+    project_type: str
+    jurisdiction: str
+    determinations: list[ApplicabilityDetermination] = Field(
+        default_factory=list
+    )
+    total_requirements: int
+    applicable_count: int
+    conditional_count: int
+    not_applicable_count: int
+    needs_human_review_count: int
+
+
 class AgentAction(BaseModel):
     action: str
     explanation: str
@@ -94,5 +125,6 @@ class WorkflowResult(BaseModel):
     summary: str
     actions: list[AgentAction] = Field(default_factory=list)
     jurisdiction_evidence: JurisdictionEvidence | None = None
+    applicability_analysis: ApplicabilityAnalysis | None = None
     decision: HumanDecision | None = None
     next_action: str | None = None

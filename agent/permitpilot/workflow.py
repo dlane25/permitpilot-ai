@@ -3,6 +3,7 @@
 from .agent import build_permitpilot_agent
 from .models import (
     AgentAction,
+    ApplicabilityAnalysis,
     ApprovalState,
     EvidenceStatus,
     HumanDecision,
@@ -11,12 +12,14 @@ from .models import (
     WorkflowResult,
     WorkflowStatus,
 )
-from .tools import inspect_project, research_jurisdiction
+from .tools import (
+    analyze_permit_applicability,
+    inspect_project,
+    research_jurisdiction,
+)
 
 
 def inspect_project_deterministically(project: ProjectInput) -> dict:
-    """Run project intake without invoking a language model."""
-
     return inspect_project(
         project_id=project.project_id,
         name=project.name,
@@ -28,14 +31,10 @@ def inspect_project_deterministically(project: ProjectInput) -> dict:
 
 
 def research_jurisdiction_deterministically(project: ProjectInput) -> dict:
-    """Load jurisdiction evidence without invoking a language model."""
-
     return research_jurisdiction(project.jurisdiction or "")
 
 
 def create_initial_workflow_result(project: ProjectInput) -> WorkflowResult:
-    """Create PermitPilot's intake-only governed workflow result."""
-
     inspection = inspect_project_deterministically(project)
 
     action = AgentAction(
@@ -86,9 +85,6 @@ def create_initial_workflow_result(project: ProjectInput) -> WorkflowResult:
 def create_jurisdiction_workflow_result(
     project: ProjectInput,
 ) -> WorkflowResult:
-    """Create a governed workflow result including jurisdiction evidence."""
-
-    inspection = inspect_project_deterministically(project)
     research = research_jurisdiction_deterministically(project)
 
     intake_action = AgentAction(
@@ -173,9 +169,142 @@ def create_jurisdiction_workflow_result(
     )
 
 
-def invoke_agent(project: ProjectInput):
-    """Invoke the real Strands PermitPilot agent against a project."""
+def create_applicability_workflow_result(
+    project: ProjectInput,
+) -> WorkflowResult:
+    jurisdiction_result = create_jurisdiction_workflow_result(project)
 
+    if (
+        jurisdiction_result.status
+        != WorkflowStatus.EVIDENCE_READY
+        or jurisdiction_result.jurisdiction_evidence is None
+    ):
+        return jurisdiction_result
+
+    evidence = jurisdiction_result.jurisdiction_evidence
+
+    requirements: list[str] = []
+    source_map: dict[str, tuple[str, str]] = {}
+
+    for source in evidence.sources:
+        for requirement in source.requirements:
+            requirements.append(requirement)
+            source_map[requirement] = (
+                source.source_name,
+                source.source_url,
+            )
+
+    raw_analysis = analyze_permit_applicability(
+        project_type=project.project_type,
+        jurisdiction=evidence.jurisdiction or "",
+        requirements=requirements,
+    )
+
+    enriched = []
+
+    for item in raw_analysis["determinations"]:
+        source_name, source_url = source_map.get(
+            item["requirement"],
+            (None, None),
+        )
+
+        enriched.append(
+            {
+                **item,
+                "source_name": source_name,
+                "source_url": source_url,
+            }
+        )
+
+    analysis = ApplicabilityAnalysis(
+        project_type=raw_analysis["project_type"],
+        jurisdiction=raw_analysis["jurisdiction"],
+        determinations=enriched,
+        total_requirements=raw_analysis["total_requirements"],
+        applicable_count=raw_analysis["applicable_count"],
+        conditional_count=raw_analysis["conditional_count"],
+        not_applicable_count=raw_analysis["not_applicable_count"],
+        needs_human_review_count=raw_analysis[
+            "needs_human_review_count"
+        ],
+    )
+
+    actions = list(jurisdiction_result.actions)
+    actions.append(
+        AgentAction(
+            action="analyze_permit_applicability",
+            explanation=(
+                "Classified verified jurisdiction requirements against "
+                "the supplied project type."
+            ),
+            confidence=95,
+            projected_impact=(
+                "Converts verified source evidence into an actionable "
+                "permit-readiness decision set."
+            ),
+        )
+    )
+
+    if analysis.needs_human_review_count > 0:
+        ambiguous = [
+            item.requirement
+            for item in analysis.determinations
+            if item.classification.value == "needs_human_review"
+        ]
+
+        decision = HumanDecision(
+            decision_id=f"{project.project_id}-applicability-review",
+            title="Permit applicability requires human review",
+            recommendation=(
+                "Review ambiguous requirements before advancing the "
+                "submission package."
+            ),
+            explanation=(
+                "One or more verified requirements could not be safely "
+                "classified from the currently available project facts."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Prevents ambiguous source language from becoming an "
+                "unsupported permit obligation."
+            ),
+            evidence=ambiguous,
+            approval_state=ApprovalState.PENDING,
+        )
+
+        return WorkflowResult(
+            project_id=project.project_id,
+            status=WorkflowStatus.DECISION_REQUIRED,
+            summary=(
+                "Permit applicability analysis completed with items "
+                "requiring human review."
+            ),
+            actions=actions,
+            jurisdiction_evidence=evidence,
+            applicability_analysis=analysis,
+            decision=decision,
+            next_action="Resolve ambiguous applicability determinations.",
+        )
+
+    return WorkflowResult(
+        project_id=project.project_id,
+        status=WorkflowStatus.APPLICABILITY_READY,
+        summary=(
+            "Verified jurisdiction requirements have been classified "
+            "for project applicability."
+        ),
+        actions=actions,
+        jurisdiction_evidence=evidence,
+        applicability_analysis=analysis,
+        decision=None,
+        next_action=(
+            "Analyze project documents against applicable and "
+            "conditional requirements."
+        ),
+    )
+
+
+def invoke_agent(project: ProjectInput):
     agent = build_permitpilot_agent()
 
     prompt = f"""
@@ -190,9 +319,11 @@ Goal: {project.goal}
 
 Use inspect_project first.
 Then use research_jurisdiction.
+Then use analyze_permit_applicability only on verified requirements.
 
 Do not invent jurisdiction-specific permit requirements.
 Distinguish verified evidence from assumptions.
+Escalate ambiguous applicability decisions.
 Explain the safest next operational step.
 """.strip()
 
