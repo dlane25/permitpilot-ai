@@ -10,6 +10,7 @@ from .models import (
     DocumentComplianceAnalysis,
     SubmissionReadinessAnalysis,
     RemediationExecutionAnalysis,
+    SubmissionPackage,
     ApprovalState,
     EvidenceStatus,
     HumanDecision,
@@ -19,6 +20,7 @@ from .models import (
     WorkflowStatus,
 )
 from .tools import (
+    prepare_submission_package,
     apply_approved_remediation,
     analyze_document_compliance,
     calculate_submission_readiness,
@@ -855,6 +857,168 @@ def create_remediation_execution_workflow_result(
     )
 
 
+
+def create_submission_package_workflow_result(
+    project: ProjectInput,
+    approved_updates: list[dict],
+) -> WorkflowResult:
+    """Prepare the final permit submission package after remediation."""
+
+    remediation_result = create_remediation_execution_workflow_result(
+        project,
+        approved_updates,
+    )
+
+    if (
+        remediation_result.status
+        != WorkflowStatus.READY_FOR_SUBMISSION
+        or remediation_result.submission_readiness is None
+        or remediation_result.jurisdiction_evidence is None
+        or remediation_result.applicability_analysis is None
+        or remediation_result.remediation_execution is None
+    ):
+        return remediation_result
+
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "fixtures"
+        / "oak-ridge"
+        / "document-inventory.json"
+    )
+
+    document_fixture = json.loads(
+        fixture_path.read_text(encoding="utf-8-sig")
+    )
+
+    executed_documents = apply_approved_remediation(
+        documents=document_fixture["documents"],
+        approved_updates=approved_updates,
+    )["documents"]
+
+    conditional_items = []
+
+    if remediation_result.document_compliance:
+        for item in remediation_result.document_compliance.results:
+            if item.status.value == "conditional":
+                conditional_items.append(
+                    {
+                        "requirement": item.requirement,
+                        "status": item.status.value,
+                        "reason": item.rationale,
+                    }
+                )
+
+    evidence_sources = [
+        {
+            "source_name": source.source_name,
+            "source_url": source.source_url,
+            "source_type": source.source_type,
+        }
+        for source in remediation_result.jurisdiction_evidence.sources
+    ]
+
+    audit_summary = [
+        (
+            f"{remediation_result.remediation_execution.applied_count} "
+            "approved remediation action(s) executed."
+        ),
+        (
+            f"{remediation_result.remediation_execution.rejected_count} "
+            "remediation action(s) rejected."
+        ),
+        (
+            f"Readiness score: "
+            f"{remediation_result.submission_readiness.readiness_score}/100."
+        ),
+        (
+            f"Blocking items: "
+            f"{remediation_result.submission_readiness.blocking_count}."
+        ),
+        "Final permit submission still requires explicit human approval.",
+    ]
+
+    raw_package = prepare_submission_package(
+        project={
+            "project_id": project.project_id,
+            "name": project.name,
+            "jurisdiction": project.jurisdiction,
+            "project_type": project.project_type,
+            "goal": project.goal,
+        },
+        documents=executed_documents,
+        readiness=remediation_result.submission_readiness.model_dump(
+            mode="json"
+        ),
+        evidence_sources=evidence_sources,
+        conditional_items=conditional_items,
+        audit_summary=audit_summary,
+    )
+
+    package = SubmissionPackage(**raw_package)
+
+    actions = list(remediation_result.actions)
+    actions.append(
+        AgentAction(
+            action="prepare_submission_package",
+            explanation=(
+                "Prepared a deterministic submission manifest containing "
+                "project documents, evidence sources, conditional disclosures, "
+                "readiness metrics, and the remediation audit summary."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Creates an auditable permit package ready for final "
+                "human authorization."
+            ),
+        )
+    )
+
+    return WorkflowResult(
+        project_id=project.project_id,
+        status=WorkflowStatus.READY_FOR_SUBMISSION,
+        summary=(
+            "Permit submission package prepared. "
+            "External submission remains human-gated."
+        ),
+        actions=actions,
+        jurisdiction_evidence=remediation_result.jurisdiction_evidence,
+        applicability_analysis=remediation_result.applicability_analysis,
+        document_compliance=remediation_result.document_compliance,
+        submission_readiness=remediation_result.submission_readiness,
+        remediation_execution=remediation_result.remediation_execution,
+        submission_package=package,
+        decision=HumanDecision(
+            decision_id=f"{project.project_id}-package-submission-approval",
+            title="Approve final permit package submission",
+            recommendation=(
+                "Review the prepared manifest and approve or reject "
+                "external submission."
+            ),
+            explanation=(
+                "PermitPilot has prepared the package but will not perform "
+                "the consequential external submission without explicit "
+                "human authorization."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Preserves human control over the final jurisdiction-facing "
+                "submission action."
+            ),
+            evidence=[
+                f"Package ID: {package.package_id}",
+                f"Readiness score: {package.readiness_score}/100",
+                f"Included documents: {package.included_document_count}",
+                (
+                    "Unresolved conditional items: "
+                    f"{package.unresolved_condition_count}"
+                ),
+            ],
+            approval_state=ApprovalState.PENDING,
+        ),
+        next_action="Review and approve or reject final permit submission.",
+    )
+
+
 def invoke_agent(project: ProjectInput):
     agent = build_permitpilot_agent()
 
@@ -874,6 +1038,8 @@ Then use analyze_permit_applicability only on verified requirements.
 Then use analyze_document_compliance against the available project documents.
 Then use calculate_submission_readiness to quantify blockers and readiness.
 Never use apply_approved_remediation unless the proposed update has explicit human approval.
+Prepare the submission package only after blockers are cleared.
+Never perform external permit submission without explicit final human approval.
 
 Do not invent jurisdiction-specific permit requirements.
 Distinguish verified evidence from assumptions.

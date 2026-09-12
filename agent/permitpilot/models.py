@@ -186,6 +186,53 @@ class RemediationExecutionAnalysis(BaseModel):
     audit_events: list[RemediationAuditEvent] = Field(default_factory=list)
 
 
+
+class SubmissionPackageDocument(BaseModel):
+    document_id: str | None = None
+    name: str | None = None
+    document_type: str | None = None
+    status: str | None = None
+
+
+class SubmissionCondition(BaseModel):
+    requirement: str | None = None
+    status: str | None = None
+    reason: str | None = None
+
+
+class SubmissionEvidenceSource(BaseModel):
+    source_name: str | None = None
+    source_url: str | None = None
+    source_type: str | None = None
+
+
+class SubmissionPackage(BaseModel):
+    package_id: str
+    project_id: str
+    project_name: str
+    jurisdiction: str | None = None
+    project_type: str
+    goal: str
+    package_status: str
+    readiness_score: int = Field(ge=0, le=100)
+    ready_for_submission: bool
+    included_documents: list[SubmissionPackageDocument] = Field(
+        default_factory=list
+    )
+    included_document_count: int
+    unresolved_conditions: list[SubmissionCondition] = Field(
+        default_factory=list
+    )
+    unresolved_condition_count: int
+    evidence_sources: list[SubmissionEvidenceSource] = Field(
+        default_factory=list
+    )
+    evidence_source_count: int
+    audit_summary: list[str] = Field(default_factory=list)
+    prepared_at: datetime
+    disclaimer: str
+
+
 class AgentAction(BaseModel):
     action: str
     explanation: str
@@ -218,5 +265,6 @@ class WorkflowResult(BaseModel):
     document_compliance: DocumentComplianceAnalysis | None = None
     submission_readiness: SubmissionReadinessAnalysis | None = None
     remediation_execution: RemediationExecutionAnalysis | None = None
+    submission_package: SubmissionPackage | None = None
     decision: HumanDecision | None = None
     next_action: str | None = None
