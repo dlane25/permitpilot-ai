@@ -11,6 +11,7 @@ class WorkflowStatus(str, Enum):
     DECISION_REQUIRED = "decision_required"
     EVIDENCE_READY = "evidence_ready"
     APPLICABILITY_READY = "applicability_ready"
+    COMPLIANCE_READY = "compliance_ready"
     READY = "ready"
     FAILED = "failed"
 
@@ -33,6 +34,14 @@ class ApplicabilityClassification(str, Enum):
     APPLICABLE = "applicable"
     CONDITIONAL = "conditional"
     NOT_APPLICABLE = "not_applicable"
+    NEEDS_HUMAN_REVIEW = "needs_human_review"
+
+
+class DocumentComplianceStatus(str, Enum):
+    SATISFIED = "satisfied"
+    MISSING = "missing"
+    PARTIAL = "partial"
+    CONDITIONAL = "conditional"
     NEEDS_HUMAN_REVIEW = "needs_human_review"
 
 
@@ -97,6 +106,36 @@ class ApplicabilityAnalysis(BaseModel):
     needs_human_review_count: int
 
 
+class ProjectDocument(BaseModel):
+    document_id: str
+    name: str
+    document_type: str
+    present: bool
+    status: str
+
+
+class DocumentComplianceCheck(BaseModel):
+    requirement: str
+    status: DocumentComplianceStatus
+    document_type: str | None = None
+    document_name: str | None = None
+    confidence: int = Field(ge=0, le=100)
+    rationale: str
+    remediation: str | None = None
+    source_name: str | None = None
+    source_url: str | None = None
+
+
+class DocumentComplianceAnalysis(BaseModel):
+    results: list[DocumentComplianceCheck] = Field(default_factory=list)
+    total_checks: int
+    satisfied_count: int
+    missing_count: int
+    partial_count: int
+    conditional_count: int
+    needs_human_review_count: int
+
+
 class AgentAction(BaseModel):
     action: str
     explanation: str
@@ -126,5 +165,6 @@ class WorkflowResult(BaseModel):
     actions: list[AgentAction] = Field(default_factory=list)
     jurisdiction_evidence: JurisdictionEvidence | None = None
     applicability_analysis: ApplicabilityAnalysis | None = None
+    document_compliance: DocumentComplianceAnalysis | None = None
     decision: HumanDecision | None = None
     next_action: str | None = None

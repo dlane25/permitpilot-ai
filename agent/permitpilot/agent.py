@@ -8,6 +8,7 @@ from strands.models import BedrockModel
 
 from .prompts import PERMITPILOT_SYSTEM_PROMPT
 from .tools import (
+    analyze_document_compliance,
     analyze_permit_applicability,
     inspect_project,
     research_jurisdiction,
@@ -26,6 +27,7 @@ def build_permitpilot_agent() -> Agent:
         inspect_project,
         research_jurisdiction,
         analyze_permit_applicability,
+        analyze_document_compliance,
     ]
 
     if model_id:

@@ -1,0 +1,61 @@
+﻿{
+  "project_id": "PP-OR-001",
+  "documents": [
+    {
+      "document_id": "DOC-001",
+      "name": "Building Permit Application",
+      "document_type": "building_permit_application",
+      "present": true,
+      "status": "complete"
+    },
+    {
+      "document_id": "DOC-002",
+      "name": "Architectural Plan Set",
+      "document_type": "architectural_plans",
+      "present": true,
+      "status": "complete"
+    },
+    {
+      "document_id": "DOC-003",
+      "name": "Deed Restrictions Declaration",
+      "document_type": "deed_restrictions_declaration",
+      "present": true,
+      "status": "complete"
+    },
+    {
+      "document_id": "DOC-004",
+      "name": "Wastewater Capacity Reservation Letter",
+      "document_type": "wastewater_capacity_letter",
+      "present": false,
+      "status": "missing"
+    },
+    {
+      "document_id": "DOC-005",
+      "name": "Electrical Plan Set",
+      "document_type": "electrical_plans",
+      "present": true,
+      "status": "partial"
+    },
+    {
+      "document_id": "DOC-006",
+      "name": "Plumbing Plan Set",
+      "document_type": "plumbing_plans",
+      "present": true,
+      "status": "complete"
+    },
+    {
+      "document_id": "DOC-007",
+      "name": "Mechanical Plan Set",
+      "document_type": "mechanical_plans",
+      "present": true,
+      "status": "complete"
+    },
+    {
+      "document_id": "DOC-008",
+      "name": "New Single Family Prerequisite Checklist",
+      "document_type": "prerequisite_checklist",
+      "present": false,
+      "status": "missing"
+    }
+  ]
+}
