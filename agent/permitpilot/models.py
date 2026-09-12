@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
@@ -164,6 +164,28 @@ class SubmissionReadinessAnalysis(BaseModel):
     estimated_delay_risk_days: int
 
 
+
+class RemediationAuditEvent(BaseModel):
+    document_type: str
+    document_name: str | None = None
+    approved: bool
+    previous_present: bool | None = None
+    previous_status: str | None = None
+    new_present: bool | None = None
+    new_status: str | None = None
+    outcome: str
+    reason: str | None = None
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
+class RemediationExecutionAnalysis(BaseModel):
+    applied_count: int
+    rejected_count: int
+    audit_events: list[RemediationAuditEvent] = Field(default_factory=list)
+
+
 class AgentAction(BaseModel):
     action: str
     explanation: str
@@ -195,5 +217,6 @@ class WorkflowResult(BaseModel):
     applicability_analysis: ApplicabilityAnalysis | None = None
     document_compliance: DocumentComplianceAnalysis | None = None
     submission_readiness: SubmissionReadinessAnalysis | None = None
+    remediation_execution: RemediationExecutionAnalysis | None = None
     decision: HumanDecision | None = None
     next_action: str | None = None

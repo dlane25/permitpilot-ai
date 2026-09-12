@@ -3,6 +3,7 @@ from .documents import analyze_document_compliance
 from .jurisdiction import research_jurisdiction
 from .project import inspect_project
 from .readiness import calculate_submission_readiness
+from .remediation import apply_approved_remediation
 
 __all__ = [
     "inspect_project",
@@ -10,4 +11,5 @@ __all__ = [
     "analyze_permit_applicability",
     "analyze_document_compliance",
     "calculate_submission_readiness",
+    "apply_approved_remediation",
 ]

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 
@@ -8,6 +8,7 @@ from strands.models import BedrockModel
 
 from .prompts import PERMITPILOT_SYSTEM_PROMPT
 from .tools import (
+    apply_approved_remediation,
     analyze_document_compliance,
     analyze_permit_applicability,
     calculate_submission_readiness,
@@ -30,6 +31,7 @@ def build_permitpilot_agent() -> Agent:
         analyze_permit_applicability,
         analyze_document_compliance,
         calculate_submission_readiness,
+        apply_approved_remediation,
     ]
 
     if model_id:
