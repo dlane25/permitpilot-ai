@@ -10,6 +10,7 @@ from .prompts import PERMITPILOT_SYSTEM_PROMPT
 from .tools import (
     analyze_document_compliance,
     analyze_permit_applicability,
+    calculate_submission_readiness,
     inspect_project,
     research_jurisdiction,
 )
@@ -28,6 +29,7 @@ def build_permitpilot_agent() -> Agent:
         research_jurisdiction,
         analyze_permit_applicability,
         analyze_document_compliance,
+        calculate_submission_readiness,
     ]
 
     if model_id:
