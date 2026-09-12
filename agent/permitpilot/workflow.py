@@ -9,6 +9,7 @@ from .models import (
     ApplicabilityAnalysis,
     DocumentComplianceAnalysis,
     SubmissionReadinessAnalysis,
+    RemediationExecutionAnalysis,
     ApprovalState,
     EvidenceStatus,
     HumanDecision,
@@ -18,6 +19,7 @@ from .models import (
     WorkflowStatus,
 )
 from .tools import (
+    apply_approved_remediation,
     analyze_document_compliance,
     calculate_submission_readiness,
     analyze_permit_applicability,
@@ -610,6 +612,249 @@ def create_submission_readiness_workflow_result(
     )
 
 
+
+def create_remediation_execution_workflow_result(
+    project: ProjectInput,
+    approved_updates: list[dict],
+) -> WorkflowResult:
+    """Apply approved remediation and recalculate submission readiness."""
+
+    applicability_result = create_applicability_workflow_result(project)
+
+    if (
+        applicability_result.status
+        != WorkflowStatus.APPLICABILITY_READY
+        or applicability_result.applicability_analysis is None
+        or applicability_result.jurisdiction_evidence is None
+    ):
+        return applicability_result
+
+    applicability = applicability_result.applicability_analysis
+    evidence = applicability_result.jurisdiction_evidence
+
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "fixtures"
+        / "oak-ridge"
+        / "document-inventory.json"
+    )
+
+    document_fixture = json.loads(
+        fixture_path.read_text(encoding="utf-8-sig")
+    )
+
+    execution = apply_approved_remediation(
+        documents=document_fixture["documents"],
+        approved_updates=approved_updates,
+    )
+
+    requirements = [
+        {
+            "requirement": item.requirement,
+            "classification": item.classification.value,
+        }
+        for item in applicability.determinations
+    ]
+
+    raw_compliance = analyze_document_compliance(
+        requirements=requirements,
+        documents=execution["documents"],
+    )
+
+    source_map = {
+        item.requirement: (
+            item.source_name,
+            item.source_url,
+        )
+        for item in applicability.determinations
+    }
+
+    enriched_results = []
+
+    for item in raw_compliance["results"]:
+        source_name, source_url = source_map.get(
+            item["requirement"],
+            (None, None),
+        )
+
+        enriched_results.append(
+            {
+                **item,
+                "source_name": source_name,
+                "source_url": source_url,
+            }
+        )
+
+    compliance = DocumentComplianceAnalysis(
+        results=enriched_results,
+        total_checks=raw_compliance["total_checks"],
+        satisfied_count=raw_compliance["satisfied_count"],
+        missing_count=raw_compliance["missing_count"],
+        partial_count=raw_compliance["partial_count"],
+        conditional_count=raw_compliance["conditional_count"],
+        needs_human_review_count=raw_compliance[
+            "needs_human_review_count"
+        ],
+    )
+
+    raw_readiness = calculate_submission_readiness(
+        compliance_results=[
+            {
+                "requirement": item.requirement,
+                "status": item.status.value,
+                "remediation": item.remediation,
+            }
+            for item in compliance.results
+        ]
+    )
+
+    readiness = SubmissionReadinessAnalysis(**raw_readiness)
+
+    audit_events = []
+
+    for item in execution["applied_updates"]:
+        audit_events.append(
+            {
+                "document_type": item["document_type"],
+                "document_name": item.get("document_name"),
+                "approved": True,
+                "previous_present": item["previous_state"].get("present"),
+                "previous_status": item["previous_state"].get("status"),
+                "new_present": item["new_state"].get("present"),
+                "new_status": item["new_state"].get("status"),
+                "outcome": "applied",
+            }
+        )
+
+    for item in execution["rejected_updates"]:
+        audit_events.append(
+            {
+                "document_type": item.get("document_type") or "unknown",
+                "document_name": None,
+                "approved": False,
+                "outcome": "rejected",
+                "reason": item.get("reason"),
+            }
+        )
+
+    remediation_execution = RemediationExecutionAnalysis(
+        applied_count=execution["applied_count"],
+        rejected_count=execution["rejected_count"],
+        audit_events=audit_events,
+    )
+
+    actions = list(applicability_result.actions)
+
+    actions.append(
+        AgentAction(
+            action="apply_approved_remediation",
+            explanation=(
+                "Applied only human-approved project document updates and "
+                "recorded the before-and-after execution state."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Closes approved permit-package gaps while preserving "
+                "human control and an auditable execution trail."
+            ),
+            approval_state=ApprovalState.APPROVED,
+        )
+    )
+
+    actions.append(
+        AgentAction(
+            action="recalculate_submission_readiness",
+            explanation=(
+                "Re-ran document compliance and submission readiness "
+                "after approved remediation."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Provides a current go/no-go submission decision after "
+                "execution."
+            ),
+        )
+    )
+
+    if not readiness.ready_for_submission:
+        decision = HumanDecision(
+            decision_id=f"{project.project_id}-remaining-remediation",
+            title="Additional remediation remains",
+            recommendation=(
+                "Resolve the remaining blocking items before permit submission."
+            ),
+            explanation=(
+                f"Approved remediation was executed, but "
+                f"{readiness.blocking_count} blocking item(s) remain."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Prevents submission while unresolved blocking compliance "
+                "gaps remain."
+            ),
+            evidence=[
+                f"{item.requirement} -> {item.status}"
+                for item in readiness.blocking_items
+            ],
+            approval_state=ApprovalState.PENDING,
+        )
+
+        return WorkflowResult(
+            project_id=project.project_id,
+            status=WorkflowStatus.READINESS_REVIEW,
+            summary=(
+                "Approved remediation executed, but the package still "
+                "contains blocking items."
+            ),
+            actions=actions,
+            jurisdiction_evidence=evidence,
+            applicability_analysis=applicability,
+            document_compliance=compliance,
+            submission_readiness=readiness,
+            remediation_execution=remediation_execution,
+            decision=decision,
+            next_action="Resolve remaining blocking remediation items.",
+        )
+
+    return WorkflowResult(
+        project_id=project.project_id,
+        status=WorkflowStatus.READY_FOR_SUBMISSION,
+        summary=(
+            "Approved remediation was executed successfully and no "
+            "blocking compliance gaps remain."
+        ),
+        actions=actions,
+        jurisdiction_evidence=evidence,
+        applicability_analysis=applicability,
+        document_compliance=compliance,
+        submission_readiness=readiness,
+        remediation_execution=remediation_execution,
+        decision=HumanDecision(
+            decision_id=f"{project.project_id}-final-submission-approval",
+            title="Approve permit submission",
+            recommendation=(
+                "Approve the remediated permit package for submission."
+            ),
+            explanation=(
+                "PermitPilot executed the approved remediation and found "
+                "no remaining blocking compliance gaps."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Advances the project to permit submission while preserving "
+                "explicit human authorization for the external action."
+            ),
+            evidence=[
+                f"Readiness score: {readiness.readiness_score}/100",
+                "Blocking items: 0",
+                f"Approved remediation actions: {execution['applied_count']}",
+            ],
+            approval_state=ApprovalState.PENDING,
+        ),
+        next_action="Request final human approval to submit permit package.",
+    )
+
+
 def invoke_agent(project: ProjectInput):
     agent = build_permitpilot_agent()
 
@@ -628,6 +873,7 @@ Then use research_jurisdiction.
 Then use analyze_permit_applicability only on verified requirements.
 Then use analyze_document_compliance against the available project documents.
 Then use calculate_submission_readiness to quantify blockers and readiness.
+Never use apply_approved_remediation unless the proposed update has explicit human approval.
 
 Do not invent jurisdiction-specific permit requirements.
 Distinguish verified evidence from assumptions.
