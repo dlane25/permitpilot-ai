@@ -1,9 +1,13 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+import json
+from pathlib import Path
 
 from .agent import build_permitpilot_agent
 from .models import (
     AgentAction,
     ApplicabilityAnalysis,
+    DocumentComplianceAnalysis,
     ApprovalState,
     EvidenceStatus,
     HumanDecision,
@@ -13,6 +17,7 @@ from .models import (
     WorkflowStatus,
 )
 from .tools import (
+    analyze_document_compliance,
     analyze_permit_applicability,
     inspect_project,
     research_jurisdiction,
@@ -304,6 +309,176 @@ def create_applicability_workflow_result(
     )
 
 
+
+def create_document_compliance_workflow_result(
+    project: ProjectInput,
+) -> WorkflowResult:
+    """Evaluate the Oak Ridge document package against applicable requirements."""
+
+    applicability_result = create_applicability_workflow_result(project)
+
+    if (
+        applicability_result.status
+        != WorkflowStatus.APPLICABILITY_READY
+        or applicability_result.applicability_analysis is None
+        or applicability_result.jurisdiction_evidence is None
+    ):
+        return applicability_result
+
+    applicability = applicability_result.applicability_analysis
+    evidence = applicability_result.jurisdiction_evidence
+
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "fixtures"
+        / "oak-ridge"
+        / "document-inventory.json"
+    )
+
+    document_fixture = json.loads(
+        fixture_path.read_text(encoding="utf-8-sig")
+    )
+
+    requirements = [
+        {
+            "requirement": item.requirement,
+            "classification": item.classification.value,
+        }
+        for item in applicability.determinations
+    ]
+
+    raw_compliance = analyze_document_compliance(
+        requirements=requirements,
+        documents=document_fixture["documents"],
+    )
+
+    source_map = {
+        item.requirement: (
+            item.source_name,
+            item.source_url,
+        )
+        for item in applicability.determinations
+    }
+
+    enriched_results = []
+
+    for item in raw_compliance["results"]:
+        source_name, source_url = source_map.get(
+            item["requirement"],
+            (None, None),
+        )
+
+        enriched_results.append(
+            {
+                **item,
+                "source_name": source_name,
+                "source_url": source_url,
+            }
+        )
+
+    compliance = DocumentComplianceAnalysis(
+        results=enriched_results,
+        total_checks=raw_compliance["total_checks"],
+        satisfied_count=raw_compliance["satisfied_count"],
+        missing_count=raw_compliance["missing_count"],
+        partial_count=raw_compliance["partial_count"],
+        conditional_count=raw_compliance["conditional_count"],
+        needs_human_review_count=raw_compliance[
+            "needs_human_review_count"
+        ],
+    )
+
+    actions = list(applicability_result.actions)
+    actions.append(
+        AgentAction(
+            action="analyze_document_compliance",
+            explanation=(
+                "Compared applicable and conditional permit requirements "
+                "against the Oak Ridge document inventory."
+            ),
+            confidence=98,
+            projected_impact=(
+                "Identifies missing or incomplete permit documents before "
+                "submission."
+            ),
+        )
+    )
+
+    blocking_items = [
+        item
+        for item in compliance.results
+        if item.status.value in {
+            "missing",
+            "partial",
+            "needs_human_review",
+        }
+    ]
+
+    if blocking_items:
+        evidence_items = [
+            (
+                f"{item.requirement} -> {item.status.value}"
+                + (
+                    f": {item.remediation}"
+                    if item.remediation
+                    else ""
+                )
+            )
+            for item in blocking_items
+        ]
+
+        decision = HumanDecision(
+            decision_id=f"{project.project_id}-document-compliance",
+            title="Permit package requires remediation",
+            recommendation=(
+                "Resolve missing and incomplete project documents before "
+                "advancing to submission readiness."
+            ),
+            explanation=(
+                "PermitPilot identified one or more documentation gaps "
+                "against verified applicable requirements."
+            ),
+            confidence=100,
+            projected_impact=(
+                "Reduces the risk of permit rejection, resubmission, and "
+                "avoidable review delays."
+            ),
+            evidence=evidence_items,
+            approval_state=ApprovalState.PENDING,
+        )
+
+        return WorkflowResult(
+            project_id=project.project_id,
+            status=WorkflowStatus.DECISION_REQUIRED,
+            summary=(
+                "Document compliance analysis found blocking package gaps."
+            ),
+            actions=actions,
+            jurisdiction_evidence=evidence,
+            applicability_analysis=applicability,
+            document_compliance=compliance,
+            decision=decision,
+            next_action=(
+                "Resolve missing and incomplete permit documents."
+            ),
+        )
+
+    return WorkflowResult(
+        project_id=project.project_id,
+        status=WorkflowStatus.COMPLIANCE_READY,
+        summary=(
+            "Applicable permit requirements have supporting project "
+            "documentation."
+        ),
+        actions=actions,
+        jurisdiction_evidence=evidence,
+        applicability_analysis=applicability,
+        document_compliance=compliance,
+        decision=None,
+        next_action="Prepare the permit submission package.",
+    )
+
+
 def invoke_agent(project: ProjectInput):
     agent = build_permitpilot_agent()
 
@@ -320,6 +495,7 @@ Goal: {project.goal}
 Use inspect_project first.
 Then use research_jurisdiction.
 Then use analyze_permit_applicability only on verified requirements.
+Then use analyze_document_compliance against the available project documents.
 
 Do not invent jurisdiction-specific permit requirements.
 Distinguish verified evidence from assumptions.
